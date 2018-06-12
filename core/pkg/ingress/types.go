@@ -243,6 +243,9 @@ type Server struct {
 	// ServerSnippet returns the snippet of server
 	// +optional
 	ServerSnippet string `json:"serverSnippet"`
+
+	// return whether to use global custom http errors
+	EnableHttpErrors bool `json:"enableHttpErrors,omitempty"`
 }
 
 // Location describes an URI inside a server.

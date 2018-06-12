@@ -52,6 +52,7 @@ The following annotations are supported:
 |[ingress.kubernetes.io/base-url-scheme](#rewrite)|string|
 |[ingress.kubernetes.io/client-body-buffer-size](#client-body-buffer-size)|string|
 |[ingress.kubernetes.io/configuration-snippet](#configuration-snippet)|string|
+|[ingress.kubernetes.io/enable-custom-http-errors](#enable-custom-http-errors)|true or false|
 |[ingress.kubernetes.io/default-backend](#default-backend)|string|
 |[ingress.kubernetes.io/enable-cors](#enable-cors)|true or false|
 |[ingress.kubernetes.io/force-ssl-redirect](#server-side-https-enforcement-through-redirect)|true or false|
@@ -178,6 +179,13 @@ Using this annotation you can add additional configuration to the NGINX location
 ingress.kubernetes.io/configuration-snippet: |
   more_set_headers "Request-Id: $request_id";
 ```
+### Enable Custom Http Errors
+
+We have global configuration 'custom-http-errors' which enables which HTTP codes should be passed for processing with the [error_page directive](http://nginx.org/en/docs/http/ngx_http_core_module.html#error_page).
+'enable-custom-http-errors' is to set whether use global 'custom-http-errors' for some server. Default is false.
+
+Example usage: `enable-custom-http-errors: true`
+
 ### Default Backend
 
 The ingress controller requires a default backend. This service is handle the response when the service in the Ingress rule does not have endpoints.

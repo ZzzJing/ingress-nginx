@@ -229,14 +229,6 @@ http {
 
     ssl_ecdh_curve {{ $cfg.SSLECDHCurve }};
 
-    {{ if .CustomErrors }}
-    # Custom error pages
-    proxy_intercept_errors on;
-    {{ end }}
-
-    {{ range $errCode := $cfg.CustomHTTPErrors }}
-    error_page {{ $errCode }} = @custom_{{ $errCode }};{{ end }}
-
     proxy_ssl_session_reuse on;
 
     {{ if $cfg.AllowBackendServerHeader }}
@@ -352,8 +344,9 @@ http {
         server_name {{ $server.Hostname }};
         {{ template "SERVER" serverConfig $all $server }}
 
-
-        {{ template "CUSTOM_ERRORS" $all }}
+        {{ if $server.EnableHttpErrors }}
+            {{ template "CUSTOM_ERRORS" $all }}
+        {{ end }}
     }
 
     {{ if $server.Alias }}
@@ -480,8 +473,12 @@ stream {
 
 {{/* definition of templates to avoid repetitions */}}
 {{ define "CUSTOM_ERRORS" }}
+
+        proxy_intercept_errors on;
+
         {{ $proxySetHeaders := .ProxySetHeaders }}
         {{ range $errCode := .Cfg.CustomHTTPErrors }}
+        error_page {{ $errCode }}  @custom_{{ $errCode }};
         location @custom_{{ $errCode }} {
             internal;
 

@@ -670,7 +670,6 @@ func (ic *GenericController) getBackendServers(ingresses []*extensions.Ingress) 
 	sort.SliceStable(aServers, func(i, j int) bool {
 		return aServers[i].Hostname < aServers[j].Hostname
 	})
-
 	return aUpstreams, aServers
 }
 
@@ -878,7 +877,6 @@ func (ic *GenericController) serviceEndpoints(svcKey, backendPort string,
 func (ic *GenericController) createServers(data []*extensions.Ingress,
 	upstreams map[string]*ingress.Backend,
 	du *ingress.Backend) map[string]*ingress.Server {
-
 	servers := make(map[string]*ingress.Server, len(data))
 	// If a server has a hostname equivalent to a pre-existing alias, then we
 	// remove the alias to avoid conflicts.
@@ -983,6 +981,9 @@ func (ic *GenericController) createServers(data []*extensions.Ingress,
 		aliasAnnotation := ic.annotations.Alias(ing)
 		srvsnippet := ic.annotations.ServerSnippet(ing)
 
+		// check if enableHttpErrors is configured
+		enableHttpErrors := ic.annotations.EnableHttpErrors(ing)
+
 		for _, rule := range ing.Spec.Rules {
 			host := rule.Host
 			if host == "" {
@@ -1002,6 +1003,8 @@ func (ic *GenericController) createServers(data []*extensions.Ingress,
 				glog.Warningf("ingress %v/%v for host %v contains a Server Snippet section that it has already been configured.",
 					ing.Namespace, ing.Name, host)
 			}
+
+			servers[host].EnableHttpErrors = enableHttpErrors
 
 			// only add a server snippet if the server does not have one previously configured
 			if servers[host].ServerSnippet == "" && srvsnippet != "" {

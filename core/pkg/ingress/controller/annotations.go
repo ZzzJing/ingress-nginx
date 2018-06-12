@@ -26,6 +26,7 @@ import (
 	"k8s.io/ingress/core/pkg/ingress/annotations/authtls"
 	"k8s.io/ingress/core/pkg/ingress/annotations/clientbodybuffersize"
 	"k8s.io/ingress/core/pkg/ingress/annotations/cors"
+	"k8s.io/ingress/core/pkg/ingress/annotations/enablecustomhttperrors"
 	"k8s.io/ingress/core/pkg/ingress/annotations/defaultbackend"
 	"k8s.io/ingress/core/pkg/ingress/annotations/healthcheck"
 	"k8s.io/ingress/core/pkg/ingress/annotations/ipwhitelist"
@@ -85,6 +86,7 @@ func newAnnotationExtractor(cfg extractorConfig) annotationExtractor {
 			"UpstreamVhost":        upstreamvhost.NewParser(),
 			"VtsFilterKey":         vtsfilterkey.NewParser(),
 			"ServerSnippet":        serversnippet.NewParser(),
+			"EnableHttpErrors":     enablecustomhttperrors.NewParser(),
 		},
 	}
 }
@@ -131,7 +133,13 @@ const (
 	clientBodyBufferSize = "ClientBodyBufferSize"
 	certificateAuth      = "CertificateAuth"
 	serverSnippet        = "ServerSnippet"
+	enableHttpErrors     = "EnableHttpErrors"
 )
+
+func (e *annotationExtractor) EnableHttpErrors(ing *extensions.Ingress) bool {
+	val, _ := e.annotations[enableHttpErrors].Parse(ing)
+	return val.(bool)
+}
 
 func (e *annotationExtractor) ServiceUpstream(ing *extensions.Ingress) bool {
 	val, _ := e.annotations[serviceUpstream].Parse(ing)

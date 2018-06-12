@@ -295,7 +295,9 @@ func (s1 *Server) Equal(s2 *Server) bool {
 	if s1.RedirectFromToWWW != s2.RedirectFromToWWW {
 		return false
 	}
-
+	if s1.EnableHttpErrors != s2.EnableHttpErrors {
+		return false
+	}
 	if len(s1.Locations) != len(s2.Locations) {
 		return false
 	}
