@@ -34,6 +34,8 @@ const (
 	nextUpstream     = "ingress.kubernetes.io/proxy-next-upstream"
 	passParams       = "ingress.kubernetes.io/proxy-pass-params"
 	requestBuffering = "ingress.kubernetes.io/proxy-request-buffering"
+	proxyRedirectFrom = "ingress.kubernetes.io/proxy-redirect-from"
+	proxyRedirectTo   = "ingress.kubernetes.io/proxy-redirect-to"
 )
 
 // Configuration returns the proxy timeout to use in the upstream server/s
@@ -48,6 +50,8 @@ type Configuration struct {
 	NextUpstream     string `json:"nextUpstream"`
 	PassParams       string `json:"passParams"`
 	RequestBuffering string `json:"requestBuffering"`
+	ProxyRedirectFrom string `json:"proxyRedirectFrom"`
+	ProxyRedirectTo   string `json:"proxyRedirectTo"`
 }
 
 // Equal tests for equality between two Configuration types
@@ -89,6 +93,13 @@ func (l1 *Configuration) Equal(l2 *Configuration) bool {
 	if l1.RequestBuffering != l2.RequestBuffering {
 		return false
 	}
+
+	if l1.ProxyRedirectFrom != l2.ProxyRedirectFrom {
+		return false
+    }
+ 	if l1.ProxyRedirectTo != l2.ProxyRedirectTo {
+ 		return false
+}
 
 	return true
 }
@@ -156,5 +167,15 @@ func (a proxy) Parse(ing *extensions.Ingress) (interface{}, error) {
 		rb = defBackend.ProxyRequestBuffering
 	}
 
-	return &Configuration{bs, ct, st, rt, bufs, cd, cp, nu, pp, rb}, nil
+	prf, err := parser.GetStringAnnotation(proxyRedirectFrom, ing)
+ 	if err != nil || rb == "" {
+ 		prf = defBackend.ProxyRedirectFrom
+ 		}
+
+	prt, err := parser.GetStringAnnotation(proxyRedirectTo, ing)
+ 	if err != nil || rb == "" {
+ 		prt = defBackend.ProxyRedirectTo
+ 		}
+
+	return &Configuration{bs, ct, st, rt, bufs, cd, cp, nu, pp, rb, prf, prt}, nil
 }

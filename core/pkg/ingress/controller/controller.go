@@ -893,6 +893,7 @@ func (ic *GenericController) createServers(data []*extensions.Ingress,
 		CookiePath:       bdef.ProxyCookiePath,
 		NextUpstream:     bdef.ProxyNextUpstream,
 		RequestBuffering: bdef.ProxyRequestBuffering,
+		ProxyRedirectFrom: bdef.ProxyRedirectFrom,
 	}
 
 	// generated on Start() with createDefaultSSLCertificate()

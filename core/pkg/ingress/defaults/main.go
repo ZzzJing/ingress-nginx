@@ -60,6 +60,17 @@ type Backend struct {
 	// http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering
 	ProxyRequestBuffering string `json:"proxy-request-buffering"`
 
+	// Sets the original text that should be changed in the "Location" and "Refresh" header fields of a proxied server response.
+ 	// http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_redirect
+ 	// Default: off
+ 	ProxyRedirectFrom string `json:"proxy-redirect-from"`
+
+  	// Sets the replacement text that should be changed in the "Location" and "Refresh" header fields of a proxied server response.
+ 	// http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_redirect
+ 	// Default: ""
+ 	ProxyRedirectTo string `json:"proxy-redirect-to"`
+
+
 	// Name server/s used to resolve names of upstream servers into IP addresses.
 	// The file /etc/resolv.conf is used as DNS resolution configuration.
 	Resolver []net.IP
