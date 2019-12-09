@@ -9,11 +9,18 @@ local resty_lock = require("resty.lock")
 local util = require("util")
 local split = require("util.split")
 
+local string_format = string.format
+local ngx_log = ngx.log
+local INFO = ngx.INFO
+
 local DECAY_TIME = 10 -- this value is in seconds
 local LOCK_KEY = ":ewma_key"
 local PICK_SET_SIZE = 2
 
-local ewma_lock = resty_lock:new("locks", {timeout = 0, exptime = 0.1})
+local ewma_lock, ewma_lock_err = resty_lock:new("balancer_ewma_locks", {timeout = 0, exptime = 0.1})
+if not ewma_lock then
+  error(ewma_lock_err)
+end
 
 local _M = { name = "ewma" }
 
@@ -46,6 +53,24 @@ local function decay_ewma(ewma, last_touched_at, rtt, now)
   return ewma
 end
 
+local function store_stats(upstream, ewma, now)
+  local success, err, forcible = ngx.shared.balancer_ewma_last_touched_at:set(upstream, now)
+  if not success then
+    ngx.log(ngx.WARN, "balancer_ewma_last_touched_at:set failed " .. err)
+  end
+  if forcible then
+    ngx.log(ngx.WARN, "balancer_ewma_last_touched_at:set valid items forcibly overwritten")
+  end
+
+  success, err, forcible = ngx.shared.balancer_ewma:set(upstream, ewma)
+  if not success then
+    ngx.log(ngx.WARN, "balancer_ewma:set failed " .. err)
+  end
+  if forcible then
+    ngx.log(ngx.WARN, "balancer_ewma:set valid items forcibly overwritten")
+  end
+end
+
 local function get_or_update_ewma(upstream, rtt, update)
   local lock_err = nil
   if update then
@@ -64,23 +89,10 @@ local function get_or_update_ewma(upstream, rtt, update)
     return ewma, nil
   end
 
-  local success, err, forcible = ngx.shared.balancer_ewma_last_touched_at:set(upstream, now)
-  if not success then
-    ngx.log(ngx.WARN, "balancer_ewma_last_touched_at:set failed " .. err)
-  end
-  if forcible then
-    ngx.log(ngx.WARN, "balancer_ewma_last_touched_at:set valid items forcibly overwritten")
-  end
-
-  success, err, forcible = ngx.shared.balancer_ewma:set(upstream, ewma)
-  if not success then
-    ngx.log(ngx.WARN, "balancer_ewma:set failed " .. err)
-  end
-  if forcible then
-    ngx.log(ngx.WARN, "balancer_ewma:set valid items forcibly overwritten")
-  end
+  store_stats(upstream, ewma, now)
 
   unlock()
+
   return ewma, nil
 end
 
@@ -115,20 +127,48 @@ local function pick_and_score(peers, k)
       lowest_score_index, lowest_score = i, new_score
     end
   end
-  return peers[lowest_score_index]
+  return peers[lowest_score_index], lowest_score
+end
+
+-- slow_start_ewma is something we use to avoid sending too many requests
+-- to the newly introduced endpoints. We currently use average ewma values
+-- of existing endpoints.
+local function calculate_slow_start_ewma(self)
+  local total_ewma = 0
+  local endpoints_count = 0
+
+  for _, endpoint in pairs(self.peers) do
+    local endpoint_string = endpoint.address .. ":" .. endpoint.port
+    local ewma = ngx.shared.balancer_ewma:get(endpoint_string)
+
+    if ewma then
+      endpoints_count = endpoints_count + 1
+      total_ewma = total_ewma + ewma
+    end
+  end
+
+  if endpoints_count == 0 then
+    ngx.log(ngx.INFO, "no ewma value exists for the endpoints")
+    return nil
+  end
+
+  return total_ewma / endpoints_count
 end
 
 function _M.balance(self)
   local peers = self.peers
-  local endpoint = peers[1]
+  local endpoint, ewma_score = peers[1], -1
 
   if #peers > 1 then
     local k = (#peers < PICK_SET_SIZE) and #peers or PICK_SET_SIZE
     local peer_copy = util.deepcopy(peers)
-    endpoint = pick_and_score(peer_copy, k)
+    endpoint, ewma_score = pick_and_score(peer_copy, k)
   end
 
-  return endpoint.address, endpoint.port
+  ngx.var.balancer_ewma_score = ewma_score
+
+  -- TODO(elvinefendi) move this processing to _M.sync
+  return endpoint.address .. ":" .. endpoint.port
 end
 
 function _M.after_balance(_)
@@ -140,24 +180,44 @@ function _M.after_balance(_)
   if util.is_blank(upstream) then
     return
   end
+
   get_or_update_ewma(upstream, rtt, true)
 end
 
 function _M.sync(self, backend)
-  local changed = not util.deep_compare(self.peers, backend.endpoints)
-  if not changed then
+  local normalized_endpoints_added, normalized_endpoints_removed = util.diff_endpoints(self.peers, backend.endpoints)
+
+  if #normalized_endpoints_added == 0 and #normalized_endpoints_removed == 0 then
+    ngx.log(ngx.INFO, "endpoints did not change for backend " .. tostring(backend.name))
     return
   end
 
+  ngx_log(INFO, string_format("[%s] peers have changed for backend %s", self.name, backend.name))
+
+  self.traffic_shaping_policy = backend.trafficShapingPolicy
+  self.alternative_backends = backend.alternativeBackends
   self.peers = backend.endpoints
 
-  -- TODO: Reset state of EWMA per backend
-  ngx.shared.balancer_ewma:flush_all()
-  ngx.shared.balancer_ewma_last_touched_at:flush_all()
+  for _, endpoint_string in ipairs(normalized_endpoints_removed) do
+    ngx.shared.balancer_ewma:delete(endpoint_string)
+    ngx.shared.balancer_ewma_last_touched_at:delete(endpoint_string)
+  end
+
+  local slow_start_ewma = calculate_slow_start_ewma(self)
+  if slow_start_ewma ~= nil then
+    local now = ngx.now()
+    for _, endpoint_string in ipairs(normalized_endpoints_added) do
+      store_stats(endpoint_string, slow_start_ewma, now)
+    end
+  end
 end
 
 function _M.new(self, backend)
-  local o = { peers = backend.endpoints }
+  local o = {
+    peers = backend.endpoints,
+    traffic_shaping_policy = backend.trafficShapingPolicy,
+    alternative_backends = backend.alternativeBackends,
+  }
   setmetatable(o, self)
   self.__index = self
   return o

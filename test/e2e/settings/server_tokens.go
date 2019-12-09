@@ -20,9 +20,8 @@ import (
 	"strings"
 
 	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
 
-	"k8s.io/api/extensions/v1beta1"
+	extensions "k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/ingress-nginx/test/e2e/framework"
@@ -33,50 +32,44 @@ var _ = framework.IngressNginxDescribe("Server Tokens", func() {
 	serverTokens := "server-tokens"
 
 	BeforeEach(func() {
-		err := f.NewEchoDeployment()
-		Expect(err).NotTo(HaveOccurred())
+		f.NewEchoDeployment()
 	})
 
 	AfterEach(func() {
 	})
 
 	It("should not exists Server header in the response", func() {
-		err := f.UpdateNginxConfigMapData(serverTokens, "false")
-		Expect(err).NotTo(HaveOccurred())
+		f.UpdateNginxConfigMapData(serverTokens, "false")
 
-		ing, err := f.EnsureIngress(framework.NewSingleIngress(serverTokens, "/", serverTokens, f.IngressController.Namespace, "http-svc", 80, nil))
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ing).NotTo(BeNil())
+		f.EnsureIngress(framework.NewSingleIngress(serverTokens, "/", serverTokens, f.Namespace, framework.EchoService, 80, nil))
 
-		err = f.WaitForNginxConfiguration(
+		f.WaitForNginxConfiguration(
 			func(cfg string) bool {
 				return strings.Contains(cfg, "server_tokens off") &&
 					strings.Contains(cfg, "more_clear_headers Server;")
 			})
-		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("should exists Server header in the response when is enabled", func() {
-		err := f.UpdateNginxConfigMapData(serverTokens, "true")
-		Expect(err).NotTo(HaveOccurred())
+		f.UpdateNginxConfigMapData(serverTokens, "true")
 
-		ing, err := f.EnsureIngress(&v1beta1.Ingress{
+		f.EnsureIngress(&extensions.Ingress{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        serverTokens,
-				Namespace:   f.IngressController.Namespace,
+				Namespace:   f.Namespace,
 				Annotations: map[string]string{},
 			},
-			Spec: v1beta1.IngressSpec{
-				Rules: []v1beta1.IngressRule{
+			Spec: extensions.IngressSpec{
+				Rules: []extensions.IngressRule{
 					{
 						Host: serverTokens,
-						IngressRuleValue: v1beta1.IngressRuleValue{
-							HTTP: &v1beta1.HTTPIngressRuleValue{
-								Paths: []v1beta1.HTTPIngressPath{
+						IngressRuleValue: extensions.IngressRuleValue{
+							HTTP: &extensions.HTTPIngressRuleValue{
+								Paths: []extensions.HTTPIngressPath{
 									{
 										Path: "/",
-										Backend: v1beta1.IngressBackend{
-											ServiceName: "http-svc",
+										Backend: extensions.IngressBackend{
+											ServiceName: framework.EchoService,
 											ServicePort: intstr.FromInt(80),
 										},
 									},
@@ -88,13 +81,9 @@ var _ = framework.IngressNginxDescribe("Server Tokens", func() {
 			},
 		})
 
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ing).NotTo(BeNil())
-
-		err = f.WaitForNginxConfiguration(
+		f.WaitForNginxConfiguration(
 			func(cfg string) bool {
 				return strings.Contains(cfg, "server_tokens on")
 			})
-		Expect(err).NotTo(HaveOccurred())
 	})
 })

@@ -7,9 +7,9 @@ The [ModSecurity-nginx](https://github.com/SpiderLabs/ModSecurity-nginx) connect
 The default ModSecurity configuration file is located in `/etc/nginx/modsecurity/modsecurity.conf`. This is the only file located in this directory and contains the default recommended configuration. Using a volume we can replace this file with the desired configuration.
 To enable the ModSecurity feature we need to specify `enable-modsecurity: "true"` in the configuration configmap.
 
->__Note:__ the default configuration use detection only, because that minimises the chances of post-installation disruption.
-The file `/var/log/modsec_audit.log` contains the log of ModSecurity.
-
+>__Note:__ the default configuration use detection only, because that minimizes the chances of post-installation disruption.
+Due to the value of the setting [SecAuditLogType=Concurrent](https://github.com/SpiderLabs/ModSecurity/wiki/Reference-Manual-(v2.x)#secauditlogtype) the ModSecurity log is stored in multiple files inside the directory `/var/log/audit`.
+The default `Serial` value in SecAuditLogType can impact performance.
 
 The OWASP ModSecurity Core Rule Set (CRS) is a set of generic attack detection rules for use with ModSecurity or compatible web application firewalls. The CRS aims to protect web applications from a wide range of attacks, including the OWASP Top Ten, with a minimum of false alerts.
 The directory `/etc/nginx/owasp-modsecurity-crs` contains the [owasp-modsecurity-crs repository](https://github.com/SpiderLabs/owasp-modsecurity-crs).

@@ -48,7 +48,7 @@ func GatherAndCompare(c prometheus.Collector, expected string, metricNames []str
 	}
 
 	if !reflect.DeepEqual(metrics, normalizeMetricFamilies(expectedMetrics)) {
-		// Encode the gathered output to the readbale text format for comparison.
+		// Encode the gathered output to the readable text format for comparison.
 		var buf1 bytes.Buffer
 		enc := expfmt.NewEncoder(&buf1, expfmt.FmtText)
 		for _, mf := range metrics {
@@ -137,8 +137,8 @@ func (s metricSorter) Swap(i, j int) {
 }
 
 func (s metricSorter) Less(i, j int) bool {
-	sort.Sort(prometheus.LabelPairSorter(s[i].Label))
-	sort.Sort(prometheus.LabelPairSorter(s[j].Label))
+	sort.Sort(labelPairSorter(s[i].Label))
+	sort.Sort(labelPairSorter(s[j].Label))
 
 	if len(s[i].Label) != len(s[j].Label) {
 		return len(s[i].Label) < len(s[j].Label)
@@ -180,4 +180,20 @@ func normalizeMetricFamilies(metricFamiliesByName map[string]*dto.MetricFamily) 
 		result = append(result, metricFamiliesByName[name])
 	}
 	return result
+}
+
+// labelPairSorter implements sort.Interface. It is used to sort a slice of
+// dto.LabelPair pointers.
+type labelPairSorter []*dto.LabelPair
+
+func (s labelPairSorter) Len() int {
+	return len(s)
+}
+
+func (s labelPairSorter) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+func (s labelPairSorter) Less(i, j int) bool {
+	return s[i].GetName() < s[j].GetName()
 }

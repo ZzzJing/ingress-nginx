@@ -25,7 +25,7 @@ import (
 	"github.com/parnurzeal/gorequest"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/api/extensions/v1beta1"
+	extensions "k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -44,71 +44,64 @@ var _ = framework.IngressNginxDescribe("Service backend - 503", func() {
 	It("should return 503 when backend service does not exist", func() {
 		host := "nonexistent.svc.com"
 
-		bi := buildIngressWithNonexistentService(host, f.IngressController.Namespace, "/")
-		ing, err := f.EnsureIngress(bi)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ing).NotTo(BeNil())
+		bi := buildIngressWithNonexistentService(host, f.Namespace, "/")
+		f.EnsureIngress(bi)
 
-		err = f.WaitForNginxServer(host,
+		f.WaitForNginxServer(host,
 			func(server string) bool {
-				return strings.Contains(server, "return 503;")
+				return strings.Contains(server, "proxy_pass http://upstream_balancer;")
 			})
-		Expect(err).NotTo(HaveOccurred())
 
 		resp, _, errs := gorequest.New().
-			Get(f.IngressController.HTTPURL).
+			Get(f.GetURL(framework.HTTP)).
 			Set("Host", host).
 			End()
-		Expect(len(errs)).Should(BeNumerically("==", 0))
+		Expect(errs).Should(BeEmpty())
 		Expect(resp.StatusCode).Should(Equal(503))
 	})
 
 	It("should return 503 when all backend service endpoints are unavailable", func() {
 		host := "unavailable.svc.com"
 
-		bi, bs := buildIngressWithUnavailableServiceEndpoints(host, f.IngressController.Namespace, "/")
+		bi, bs := buildIngressWithUnavailableServiceEndpoints(host, f.Namespace, "/")
 
-		svc, err := f.EnsureService(bs)
-		Expect(err).NotTo(HaveOccurred())
+		svc := f.EnsureService(bs)
 		Expect(svc).NotTo(BeNil())
 
-		ing, err := f.EnsureIngress(bi)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ing).NotTo(BeNil())
+		f.EnsureIngress(bi)
 
-		err = f.WaitForNginxServer(host,
+		f.WaitForNginxServer(host,
 			func(server string) bool {
-				return strings.Contains(server, "return 503;")
+				return strings.Contains(server, "proxy_pass http://upstream_balancer;")
 			})
-		Expect(err).NotTo(HaveOccurred())
 
 		resp, _, errs := gorequest.New().
-			Get(f.IngressController.HTTPURL).
+			Get(f.GetURL(framework.HTTP)).
 			Set("Host", host).
 			End()
-		Expect(len(errs)).Should(BeNumerically("==", 0))
+		Expect(errs).Should(BeEmpty())
 		Expect(resp.StatusCode).Should(Equal(503))
 	})
 
 })
 
-func buildIngressWithNonexistentService(host, namespace, path string) *v1beta1.Ingress {
+func buildIngressWithNonexistentService(host, namespace, path string) *extensions.Ingress {
 	backendService := "nonexistent-svc"
-	return &v1beta1.Ingress{
+	return &extensions.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      host,
 			Namespace: namespace,
 		},
-		Spec: v1beta1.IngressSpec{
-			Rules: []v1beta1.IngressRule{
+		Spec: extensions.IngressSpec{
+			Rules: []extensions.IngressRule{
 				{
 					Host: host,
-					IngressRuleValue: v1beta1.IngressRuleValue{
-						HTTP: &v1beta1.HTTPIngressRuleValue{
-							Paths: []v1beta1.HTTPIngressPath{
+					IngressRuleValue: extensions.IngressRuleValue{
+						HTTP: &extensions.HTTPIngressRuleValue{
+							Paths: []extensions.HTTPIngressPath{
 								{
 									Path: path,
-									Backend: v1beta1.IngressBackend{
+									Backend: extensions.IngressBackend{
 										ServiceName: backendService,
 										ServicePort: intstr.FromInt(80),
 									},
@@ -122,23 +115,23 @@ func buildIngressWithNonexistentService(host, namespace, path string) *v1beta1.I
 	}
 }
 
-func buildIngressWithUnavailableServiceEndpoints(host, namespace, path string) (*v1beta1.Ingress, *corev1.Service) {
+func buildIngressWithUnavailableServiceEndpoints(host, namespace, path string) (*extensions.Ingress, *corev1.Service) {
 	backendService := "unavailable-svc"
-	return &v1beta1.Ingress{
+	return &extensions.Ingress{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      host,
 				Namespace: namespace,
 			},
-			Spec: v1beta1.IngressSpec{
-				Rules: []v1beta1.IngressRule{
+			Spec: extensions.IngressSpec{
+				Rules: []extensions.IngressRule{
 					{
 						Host: host,
-						IngressRuleValue: v1beta1.IngressRuleValue{
-							HTTP: &v1beta1.HTTPIngressRuleValue{
-								Paths: []v1beta1.HTTPIngressPath{
+						IngressRuleValue: extensions.IngressRuleValue{
+							HTTP: &extensions.HTTPIngressRuleValue{
+								Paths: []extensions.HTTPIngressPath{
 									{
 										Path: path,
-										Backend: v1beta1.IngressBackend{
+										Backend: extensions.IngressBackend{
 											ServiceName: backendService,
 											ServicePort: intstr.FromInt(80),
 										},

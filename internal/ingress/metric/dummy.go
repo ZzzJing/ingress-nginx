@@ -16,7 +16,15 @@ limitations under the License.
 
 package metric
 
-import "k8s.io/ingress-nginx/internal/ingress"
+import (
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/ingress-nginx/internal/ingress"
+)
+
+// NewDummyCollector returns a dummy metric collector
+func NewDummyCollector() Collector {
+	return &DummyCollector{}
+}
 
 // DummyCollector dummy implementation for mocks in tests
 type DummyCollector struct{}
@@ -30,6 +38,12 @@ func (dc DummyCollector) IncReloadCount() {}
 // IncReloadErrorCount ...
 func (dc DummyCollector) IncReloadErrorCount() {}
 
+// IncCheckCount ...
+func (dc DummyCollector) IncCheckCount(string, string) {}
+
+// IncCheckErrorCount ...
+func (dc DummyCollector) IncCheckErrorCount(string, string) {}
+
 // RemoveMetrics ...
 func (dc DummyCollector) RemoveMetrics(ingresses, endpoints []string) {}
 
@@ -41,3 +55,12 @@ func (dc DummyCollector) Stop() {}
 
 // SetSSLExpireTime ...
 func (dc DummyCollector) SetSSLExpireTime([]*ingress.Server) {}
+
+// SetHosts ...
+func (dc DummyCollector) SetHosts(hosts sets.String) {}
+
+// OnStartedLeading indicates the pod is not the current leader
+func (dc DummyCollector) OnStartedLeading(electionID string) {}
+
+// OnStoppedLeading indicates the pod is not the current leader
+func (dc DummyCollector) OnStoppedLeading(electionID string) {}
