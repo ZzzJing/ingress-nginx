@@ -18,27 +18,66 @@ package framework
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
+	"regexp"
+	"strconv"
+	"strings"
 
-	"k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 )
 
+// GetLbAlgorithm returns algorithm identifier for the given backend
+func (f *Framework) GetLbAlgorithm(serviceName string, servicePort int) (string, error) {
+	backendName := fmt.Sprintf("%s-%s-%v", f.Namespace, serviceName, servicePort)
+	cmd := fmt.Sprintf("/dbg backends get %s", backendName)
+
+	output, err := f.ExecIngressPod(cmd)
+	if err != nil {
+		return "", err
+	}
+
+	var backend map[string]interface{}
+	err = json.Unmarshal([]byte(output), &backend)
+	if err != nil {
+		return "", err
+	}
+
+	algorithm, ok := backend["load-balance"].(string)
+	if !ok {
+		return "", fmt.Errorf("error while accessing load-balance field of backend")
+	}
+
+	return algorithm, nil
+}
+
+// ExecIngressPod executes a command inside the first container in ingress controller running pod
+func (f *Framework) ExecIngressPod(command string) (string, error) {
+	pod, err := getIngressNGINXPod(f.Namespace, f.KubeClientSet)
+	if err != nil {
+		return "", err
+	}
+
+	return f.ExecCommand(pod, command)
+}
+
 // ExecCommand executes a command inside a the first container in a running pod
-func (f *Framework) ExecCommand(pod *v1.Pod, command string) (string, error) {
+func (f *Framework) ExecCommand(pod *corev1.Pod, command string) (string, error) {
 	var (
 		execOut bytes.Buffer
 		execErr bytes.Buffer
 	)
 
-	args := fmt.Sprintf("kubectl exec --namespace %v %v --container nginx-ingress-controller -- %v", pod.Namespace, pod.Name, command)
-	cmd := exec.Command("/bin/bash", "-c", args)
+	cmd := exec.Command("/bin/bash", "-c", fmt.Sprintf("%v exec --namespace %s %s --container nginx-ingress-controller -- %s", KubectlPath, pod.Namespace, pod.Name, command))
 	cmd.Stdout = &execOut
 	cmd.Stderr = &execErr
 
 	err := cmd.Run()
 	if err != nil {
-		return "", fmt.Errorf("could not execute: %v", err)
+		return "", fmt.Errorf("could not execute '%s %s': %v", cmd.Path, cmd.Args, err)
+
 	}
 
 	if execErr.Len() > 0 {
@@ -49,12 +88,61 @@ func (f *Framework) ExecCommand(pod *v1.Pod, command string) (string, error) {
 }
 
 // NewIngressController deploys a new NGINX Ingress controller in a namespace
-func (f *Framework) NewIngressController(namespace string) error {
-	cmd := exec.Command("./wait-for-nginx.sh", namespace)
+func (f *Framework) NewIngressController(namespace string, namespaceOverlay string) error {
+	// Creates an nginx deployment
+	cmd := exec.Command("./wait-for-nginx.sh", namespace, namespaceOverlay)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("Unexpected error waiting for ingress controller deployment: %v.\nLogs:\n%v", err, string(out))
+		return fmt.Errorf("unexpected error waiting for ingress controller deployment: %v.\nLogs:\n%v", err, string(out))
 	}
 
 	return nil
+}
+
+var (
+	proxyRegexp = regexp.MustCompile("Starting to serve on .*:([0-9]+)")
+)
+
+// KubectlProxy creates a proxy to kubernetes apiserver
+func (f *Framework) KubectlProxy(port int) (int, *exec.Cmd, error) {
+	cmd := exec.Command("/bin/bash", "-c", fmt.Sprintf("%s proxy --accept-hosts=.* --address=0.0.0.0 --port=%d", KubectlPath, port))
+	stdout, stderr, err := startCmdAndStreamOutput(cmd)
+	if err != nil {
+		return -1, nil, err
+	}
+
+	defer stdout.Close()
+	defer stderr.Close()
+
+	buf := make([]byte, 128)
+	var n int
+	if n, err = stdout.Read(buf); err != nil {
+		return -1, cmd, fmt.Errorf("failed to read from kubectl proxy stdout: %v", err)
+	}
+
+	output := string(buf[:n])
+	match := proxyRegexp.FindStringSubmatch(output)
+	if len(match) == 2 {
+		if port, err := strconv.Atoi(match[1]); err == nil {
+			return port, cmd, nil
+		}
+	}
+
+	return -1, cmd, fmt.Errorf("failed to parse port from proxy stdout: %s", output)
+}
+
+func startCmdAndStreamOutput(cmd *exec.Cmd) (stdout, stderr io.ReadCloser, err error) {
+	stdout, err = cmd.StdoutPipe()
+	if err != nil {
+		return
+	}
+
+	stderr, err = cmd.StderrPipe()
+	if err != nil {
+		return
+	}
+
+	Logf("Asynchronously running '%s'", strings.Join(cmd.Args, " "))
+	err = cmd.Start()
+	return
 }

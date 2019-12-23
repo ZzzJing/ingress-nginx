@@ -20,15 +20,18 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/golang/glog"
-	extensions "k8s.io/api/extensions/v1beta1"
+	networking "k8s.io/api/networking/v1beta1"
+	"k8s.io/klog"
 
 	"k8s.io/ingress-nginx/internal/ingress/annotations/parser"
 	"k8s.io/ingress-nginx/internal/ingress/resolver"
 )
 
+// HTTP protocol
+const HTTP = "HTTP"
+
 var (
-	validProtocols = regexp.MustCompile(`^(HTTP|HTTPS|AJP|GRPC|GRPCS)$`)
+	validProtocols = regexp.MustCompile(`^(HTTP|HTTPS|AJP|GRPC|GRPCS|FCGI)$`)
 )
 
 type backendProtocol struct {
@@ -42,20 +45,20 @@ func NewParser(r resolver.Resolver) parser.IngressAnnotation {
 
 // ParseAnnotations parses the annotations contained in the ingress
 // rule used to indicate the backend protocol.
-func (a backendProtocol) Parse(ing *extensions.Ingress) (interface{}, error) {
+func (a backendProtocol) Parse(ing *networking.Ingress) (interface{}, error) {
 	if ing.GetAnnotations() == nil {
-		return "HTTP", nil
+		return HTTP, nil
 	}
 
 	proto, err := parser.GetStringAnnotation("backend-protocol", ing)
 	if err != nil {
-		return "HTTP", nil
+		return HTTP, nil
 	}
 
 	proto = strings.TrimSpace(strings.ToUpper(proto))
 	if !validProtocols.MatchString(proto) {
-		glog.Warningf("Protocol %v is not a valid value for the backend-protocol annotation. Using HTTP as protocol", proto)
-		return "HTTP", nil
+		klog.Warningf("Protocol %v is not a valid value for the backend-protocol annotation. Using HTTP as protocol", proto)
+		return HTTP, nil
 	}
 
 	return proto, nil

@@ -13,12 +13,12 @@
 # limitations under the License.
 
 # 0.0.0 shouldn't clobber any released builds
-TAG ?= 0.57
+TAG ?= 0.94
 REGISTRY ?= quay.io/kubernetes-ingress-controller
 ARCH ?= $(shell go env GOARCH)
 DOCKER ?= docker
 
-ALL_ARCH = amd64 arm arm64 ppc64le s390x
+ALL_ARCH = amd64 arm arm64
 SED_I?=sed -i
 GOHOSTOS ?= $(shell go env GOHOSTOS)
 
@@ -26,7 +26,7 @@ ifeq ($(GOHOSTOS),darwin)
   SED_I=sed -i ''
 endif
 
-QEMUVERSION=v2.12.0
+QEMUVERSION=v4.1.0-1
 
 IMGNAME = nginx
 IMAGE = $(REGISTRY)/$(IMGNAME)
@@ -40,12 +40,6 @@ ifeq ($(ARCH),arm)
 endif
 ifeq ($(ARCH),arm64)
 	QEMUARCH=aarch64
-endif
-ifeq ($(ARCH),ppc64le)
-	QEMUARCH=ppc64le
-endif
-ifeq ($(ARCH),s390x)
-	QEMUARCH=s390x
 endif
 
 TEMP_DIR := $(shell mktemp -d)
@@ -80,7 +74,7 @@ else
 	cd $(TEMP_DIR) && $(SED_I) "s/CROSS_BUILD_//g" Dockerfile
 endif
 
-	$(DOCKER) build -t $(MULTI_ARCH_IMG):$(TAG) $(TEMP_DIR)
+	$(DOCKER) build --no-cache -t $(MULTI_ARCH_IMG):$(TAG) $(TEMP_DIR)
 
 ifeq ($(ARCH), amd64)
 	# This is for to maintain the backward compatibility

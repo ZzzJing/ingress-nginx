@@ -8,7 +8,32 @@ You need a [TLS cert](../PREREQUISITES.md#tls-certificates) and a [test HTTP ser
 
 ## Deployment
 
-The following command instructs the controller to terminate traffic using the provided 
+Create a `values.yaml` file.
+
+```yaml
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: nginx-test
+spec:
+  tls:
+    - hosts:
+      - foo.bar.com
+      # This assumes tls-secret exists and the SSL
+      # certificate contains a CN for foo.bar.com
+      secretName: tls-secret
+  rules:
+    - host: foo.bar.com
+      http:
+        paths:
+        - path: /
+          backend:
+            # This assumes http-svc exists and routes to healthy endpoints
+            serviceName: http-svc
+            servicePort: 80
+```
+
+The following command instructs the controller to terminate traffic using the provided
 TLS cert, and forward un-encrypted HTTP traffic to the test HTTP service.
 
 ```console

@@ -4,10 +4,10 @@
 
 Anytime we reference a TLS secret, we mean a PEM-encoded X.509, RSA (2048) secret.
 
-You can generate a self-signed certificate and private key with with:
+You can generate a self-signed certificate and private key with:
 
 ```bash
-$ openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout ${KEY_FILE} -out ${CERT_FILE} -subj "/CN=${HOST}/O=${HOST}"`
+$ openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout ${KEY_FILE} -out ${CERT_FILE} -subj "/CN=${HOST}/O=${HOST}"
 ```
 
 Then create the secret in the cluster via:
@@ -34,14 +34,28 @@ If this flag is not provided NGINX will use a self-signed certificate.
 For instance, if you have a TLS secret `foo-tls` in the `default` namespace,
 add `--default-ssl-certificate=default/foo-tls` in the `nginx-controller` deployment.
 
+The default certificate will also be used for ingress `tls:` sections that do not
+have a `secretName` option.
+
 ## SSL Passthrough
 
-The flag `--enable-ssl-passthrough` enables the SSL passthrough feature.
-By default this feature is disabled.
+The [`--enable-ssl-passthrough`](cli-arguments.md) flag enables the SSL Passthrough feature, which is disabled by
+default. This is required to enable passthrough backends in Ingress objects.
 
-This is required to enable passthrough backends in Ingress configurations.
+!!! warning
+    This feature is implemented by intercepting **all traffic** on the configured HTTPS port (default: 443) and handing
+    it over to a local TCP proxy. This bypasses NGINX completely and introduces a non-negligible performance penalty.
 
-TODO: Improve this documentation.
+SSL Passthrough leverages [SNI][SNI] and reads the virtual domain from the TLS negotiation, which requires compatible
+clients. After a connection has been accepted by the TLS listener, it is handled by the controller itself and piped back
+and forth between the backend and the client.
+
+If there is no hostname matching the requested host name, the request is handed over to NGINX on the configured
+passthrough proxy port (default: 442), which proxies the request to the default backend.
+
+!!! note
+    Unlike HTTP backends, traffic to Passthrough backends is sent to the *clusterIP* of the backing Service instead of
+    individual Endpoints.
 
 ## HTTP Strict Transport Security
 
@@ -123,3 +137,4 @@ data:
 [Let's Encrypt]:https://letsencrypt.org
 [ConfigMap]: ./nginx-configuration/configmap.md
 [ssl-ciphers]: ./nginx-configuration/configmap.md#ssl-ciphers
+[SNI]: https://en.wikipedia.org/wiki/Server_Name_Indication

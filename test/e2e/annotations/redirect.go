@@ -52,23 +52,19 @@ var _ = framework.IngressNginxDescribe("Annotations - Redirect", func() {
 
 		annotations := map[string]string{"nginx.ingress.kubernetes.io/permanent-redirect": redirectURL}
 
-		ing := framework.NewSingleIngress(host, redirectPath, host, f.IngressController.Namespace, "http-svc", 80, &annotations)
-		_, err := f.EnsureIngress(ing)
+		ing := framework.NewSingleIngress(host, redirectPath, host, f.Namespace, framework.EchoService, 80, annotations)
+		f.EnsureIngress(ing)
 
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ing).NotTo(BeNil())
-
-		err = f.WaitForNginxServer(host,
+		f.WaitForNginxServer(host,
 			func(server string) bool {
 				return strings.Contains(server, fmt.Sprintf("if ($uri ~* %s) {", redirectPath)) &&
 					strings.Contains(server, fmt.Sprintf("return 301 %s;", redirectURL))
 			})
-		Expect(err).NotTo(HaveOccurred())
 
 		By("sending request to redirected URL path")
 
 		resp, body, errs := gorequest.New().
-			Get(f.IngressController.HTTPURL+redirectPath).
+			Get(f.GetURL(framework.HTTP)+redirectPath).
 			Set("Host", host).
 			RedirectPolicy(noRedirectPolicyFunc).
 			End()
@@ -76,7 +72,7 @@ var _ = framework.IngressNginxDescribe("Annotations - Redirect", func() {
 		Expect(errs).To(BeNil())
 		Expect(resp.StatusCode).Should(BeNumerically("==", http.StatusMovedPermanently))
 		Expect(resp.Header.Get("Location")).Should(Equal(redirectURL))
-		Expect(body).Should(ContainSubstring("nginx/"))
+		Expect(body).Should(ContainSubstring("openresty/"))
 	})
 
 	It("should respond with a custom redirect code", func() {
@@ -92,23 +88,19 @@ var _ = framework.IngressNginxDescribe("Annotations - Redirect", func() {
 			"nginx.ingress.kubernetes.io/permanent-redirect-code": strconv.Itoa(redirectCode),
 		}
 
-		ing := framework.NewSingleIngress(host, redirectPath, host, f.IngressController.Namespace, "http-svc", 80, &annotations)
-		_, err := f.EnsureIngress(ing)
+		ing := framework.NewSingleIngress(host, redirectPath, host, f.Namespace, framework.EchoService, 80, annotations)
+		f.EnsureIngress(ing)
 
-		Expect(err).NotTo(HaveOccurred())
-		Expect(ing).NotTo(BeNil())
-
-		err = f.WaitForNginxServer(host,
+		f.WaitForNginxServer(host,
 			func(server string) bool {
 				return strings.Contains(server, fmt.Sprintf("if ($uri ~* %s) {", redirectPath)) &&
 					strings.Contains(server, fmt.Sprintf("return %d %s;", redirectCode, redirectURL))
 			})
-		Expect(err).NotTo(HaveOccurred())
 
 		By("sending request to redirected URL path")
 
 		resp, body, errs := gorequest.New().
-			Get(f.IngressController.HTTPURL+redirectPath).
+			Get(f.GetURL(framework.HTTP)+redirectPath).
 			Set("Host", host).
 			RedirectPolicy(noRedirectPolicyFunc).
 			End()
@@ -116,6 +108,6 @@ var _ = framework.IngressNginxDescribe("Annotations - Redirect", func() {
 		Expect(errs).To(BeNil())
 		Expect(resp.StatusCode).Should(BeNumerically("==", redirectCode))
 		Expect(resp.Header.Get("Location")).Should(Equal(redirectURL))
-		Expect(body).Should(ContainSubstring("nginx/"))
+		Expect(body).Should(ContainSubstring("openresty/"))
 	})
 })

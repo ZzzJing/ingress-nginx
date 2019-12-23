@@ -19,24 +19,26 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-export NGINX_VERSION=1.15.2
-export NDK_VERSION=0.3.1rc1
-export SETMISC_VERSION=0.32
-export STICKY_SESSIONS_VERSION=08a395c66e42
-export MORE_HEADERS_VERSION=0.33
-export NGINX_DIGEST_AUTH=274490cec649e7300fea97fed13d84e596bbc0ce
+export DEBIAN_FRONTEND=noninteractive
+
+export OPENRESTY_VERSION=7508c1852265bd04fdb2dfd64989d4c490440f1a
+export NGINX_DIGEST_AUTH=cd8641886c873cf543255aeda20d23e4cd603d05
 export NGINX_SUBSTITUTIONS=bc58cb11844bc42735bbaef7085ea86ace46d05b
-export NGINX_OPENTRACING_VERSION=0.6.0
-export OPENTRACING_CPP_VERSION=1.4.0
-export ZIPKIN_CPP_VERSION=0.3.1
-export JAEGER_VERSION=0.4.1
-export MODSECURITY_VERSION=37b76e88df4bce8a9846345c27271d7e6ce1acfb
-export LUA_NGX_VERSION=e94f2e5d64daa45ff396e262d8dab8e56f5f10e0
-export LUA_UPSTREAM_VERSION=0.07
-export COOKIE_FLAG_VERSION=1.1.0
-export NGINX_INFLUXDB_VERSION=f20cfb2458c338f162132f5a21eb021e2cbe6383
-export GEOIP2_VERSION=2.0
+export NGINX_OPENTRACING_VERSION=0.9.0
+export OPENTRACING_CPP_VERSION=1.5.1
+export ZIPKIN_CPP_VERSION=0.5.2
+export JAEGER_VERSION=741b1af2805388e98dbfea449f40c6d6b19c13be
+export MSGPACK_VERSION=3.2.0
+export DATADOG_CPP_VERSION=1.1.1
+export MODSECURITY_VERSION=1.0.1
+export MODSECURITY_LIB_VERSION=3.0.3
+export OWASP_MODSECURITY_CRS_VERSION=3.2.0
+export LUA_BRIDGE_TRACER_VERSION=0.1.1
+export NGINX_INFLUXDB_VERSION=5b09391cb7b9a889687c0aa67964c06a2d933e8b
+export GEOIP2_VERSION=3.2
 export NGINX_AJP_VERSION=bf6cd93f2098b59260de8d494f0f4b1f11a84627
+export RESTY_LUAROCKS_VERSION=3.1.3
+export LUA_RESTY_BALANCER_VERSION=0.03
 
 export BUILD_PATH=/tmp/build
 
@@ -48,15 +50,13 @@ get_src()
   url="$2"
   f=$(basename "$url")
 
+  echo "Downloading $url"
+
   curl -sSL "$url" -o "$f"
   echo "$hash  $f" | sha256sum -c - || exit 10
   tar xzf "$f"
   rm -rf "$f"
 }
-
-if [[ ${ARCH} == "ppc64le" ]]; then
-  clean-install software-properties-common
-fi
 
 apt-get update && apt-get dist-upgrade -y
 
@@ -79,50 +79,29 @@ clean-install \
   libperl-dev \
   cmake \
   util-linux \
-  lua5.1 liblua5.1-0 liblua5.1-dev \
   lmdb-utils \
-  libjemalloc1 libjemalloc-dev \
   wget \
   libcurl4-openssl-dev \
   libprotobuf-dev protobuf-compiler \
   libz-dev \
   procps \
   git g++ pkgconf flex bison doxygen libyajl-dev liblmdb-dev libtool dh-autoreconf libxml2 libpcre++-dev libxml2-dev \
-  lua-cjson \
   python \
-  luarocks \
   libmaxminddb-dev \
-  libatomic-ops-dev \
-  authbind \
   dumb-init \
+  bc \
+  unzip \
+  nano \
+  ssdeep \
+  dos2unix mercurial \
+  libyaml-cpp0.6 \
   || exit 1
 
-if [[ ${ARCH} == "x86_64" ]]; then
-  ln -s /usr/lib/x86_64-linux-gnu/liblua5.1.so /usr/lib/liblua.so
-  ln -s /usr/lib/x86_64-linux-gnu /usr/lib/lua-platform-path
-fi
-
+# https://www.mail-archive.com/debian-bugs-dist@lists.debian.org/msg1667178.html
 if [[ ${ARCH} == "armv7l" ]]; then
-  ln -s /usr/lib/arm-linux-gnueabihf/liblua5.1.so /usr/lib/liblua.so
-  ln -s /usr/lib/arm-linux-gnueabihf /usr/lib/lua-platform-path
-fi
-
-if [[ ${ARCH} == "aarch64" ]]; then
-  ln -s /usr/lib/aarch64-linux-gnu/liblua5.1.so /usr/lib/liblua.so
-  ln -s /usr/lib/aarch64-linux-gnu /usr/lib/lua-platform-path
-fi
-
-if [[ ${ARCH} == "ppc64le" ]]; then
-  ln -s /usr/lib/powerpc64le-linux-gnu/liblua5.1.so /usr/lib/liblua.so
-  ln -s /usr/lib/powerpc64le-linux-gnu /usr/lib/lua-platform-path
-fi
-
-if [[ ${ARCH} == "s390x" ]]; then
-  ln -s /usr/lib/s390x-linux-gnu/liblua5.1.so /usr/lib/liblua.so
-  ln -s /usr/lib/s390x-linux-gnu /usr/lib/lua-platform-path
-  # avoid error:
-  # git: ../nptl/pthread_mutex_lock.c:81: __pthread_mutex_lock: Assertion `mutex->__data.__owner == 0' failed.
-  git config --global pack.threads "1"
+  echo "Fixing ca-certificates"
+  touch /etc/ssl/certs/ca-certificates.crt
+  c_rehash
 fi
 
 mkdir -p /etc/nginx
@@ -130,104 +109,70 @@ mkdir -p /etc/nginx
 # Get the GeoIP data
 GEOIP_FOLDER=/etc/nginx/geoip
 mkdir -p $GEOIP_FOLDER
-function geoip_get {
-  wget -O $GEOIP_FOLDER/$1 $2 || { echo "Could not download $1, exiting." ; exit 1; }
-  gunzip $GEOIP_FOLDER/$1
+
+function geoip2_get {
+  wget -O $GEOIP_FOLDER/$1.tar.gz $2 || { echo "Could not download $1, exiting." ; exit 1; }
+  mkdir $GEOIP_FOLDER/$1 \
+    && tar xf $GEOIP_FOLDER/$1.tar.gz -C $GEOIP_FOLDER/$1 --strip-components 1 \
+    && mv $GEOIP_FOLDER/$1/$1.mmdb $GEOIP_FOLDER/$1.mmdb \
+    && rm -rf $GEOIP_FOLDER/$1 \
+    && rm -rf $GEOIP_FOLDER/$1.tar.gz
 }
 
-geoip_get "GeoIPASNum.dat.gz"     "http://download.maxmind.com/download/geoip/database/asnum/GeoIPASNum.dat.gz"
-geoip_get "GeoIP.dat.gz"          "https://geolite.maxmind.com/download/geoip/database/GeoLiteCountry/GeoIP.dat.gz"
-geoip_get "GeoLite2-City.mmdb.gz" "http://geolite.maxmind.com/download/geoip/database/GeoLite2-City.tar.gz"
-geoip_get "GeoLite2-ASN.mmdb.gz"  "http://geolite.maxmind.com/download/geoip/database/GeoLite2-ASN.tar.gz"
-geoip_get "GeoLiteCity.dat.gz"    "https://geolite.maxmind.com/download/geoip/database/GeoLiteCity.dat.gz"
+geoip2_get "GeoLite2-City"     "http://geolite.maxmind.com/download/geoip/database/GeoLite2-City.tar.gz"
+geoip2_get "GeoLite2-ASN"      "http://geolite.maxmind.com/download/geoip/database/GeoLite2-ASN.tar.gz"
 
 mkdir --verbose -p "$BUILD_PATH"
 cd "$BUILD_PATH"
 
 # download, verify and extract the source files
-get_src eeba09aecfbe8277ac33a5a2486ec2d6731739f3c1c701b42a0c3784af67ad90 \
-        "http://nginx.org/download/nginx-$NGINX_VERSION.tar.gz"
+get_src 221cfecadd0ed2902738757e7d8fb0bc41882840f07ea87112740b44f173722f \
+        "https://github.com/openresty/openresty/archive/${OPENRESTY_VERSION}.tar.gz"
 
-get_src 49f50d4cd62b166bc1aaf712febec5e028d9f187cedbc27a610dfd01bdde2d36 \
-        "https://github.com/simpl/ngx_devel_kit/archive/v$NDK_VERSION.tar.gz"
-
-get_src f1ad2459c4ee6a61771aa84f77871f4bfe42943a4aa4c30c62ba3f981f52c201 \
-        "https://github.com/openresty/set-misc-nginx-module/archive/v$SETMISC_VERSION.tar.gz"
-
-get_src a3dcbab117a9c103bc1ea5200fc00a7b7d2af97ff7fd525f16f8ac2632e30fbf \
-        "https://github.com/openresty/headers-more-nginx-module/archive/v$MORE_HEADERS_VERSION.tar.gz"
-
-get_src 53e440737ed1aff1f09fae150219a45f16add0c8d6e84546cb7d80f73ebffd90 \
-        "https://bitbucket.org/nginx-goodies/nginx-sticky-module-ng/get/$STICKY_SESSIONS_VERSION.tar.gz"
-
-get_src ede0ad490cb9dd69da348bdea2a60a4c45284c9777b2f13fa48394b6b8e7671c \
+get_src fe683831f832aae4737de1e1026a4454017c2d5f98cb88b08c5411dc380062f8 \
         "https://github.com/atomx/nginx-http-auth-digest/archive/$NGINX_DIGEST_AUTH.tar.gz"
 
 get_src 618551948ab14cac51d6e4ad00452312c7b09938f59ebff4f93875013be31f2d \
         "https://github.com/yaoweibin/ngx_http_substitutions_filter_module/archive/$NGINX_SUBSTITUTIONS.tar.gz"
 
-get_src b6a6eecb0b18b15398b7d6ed0a2db4cfd7a9015c1e26f9da4160acc588b82b6f \
+get_src 4fc410d7aef0c8a6371afa9f249d2c6cec50ea88785d05052f8f457c35b69c18 \
         "https://github.com/opentracing-contrib/nginx-opentracing/archive/v$NGINX_OPENTRACING_VERSION.tar.gz"
 
-get_src 2eb0a4a7dc62bc8cbf12872080197b41d53b4c04966c860774a6b11fd59fad55 \
+get_src 015c4187f7a6426a2b5196f0ccd982aa87f010cf61f507ae3ce5c90523f92301 \
         "https://github.com/opentracing/opentracing-cpp/archive/v$OPENTRACING_CPP_VERSION.tar.gz"
 
-get_src f16a6f1eed494ca3c2607d7ad671cb134bd7eb320c5969c8281c10922a146589 \
+get_src 30affaf0f3a84193f7127cc0135da91773ce45d902414082273dae78914f73df \
         "https://github.com/rnburn/zipkin-cpp-opentracing/archive/v$ZIPKIN_CPP_VERSION.tar.gz"
 
-get_src fe7d3188e097d68f1942d46c4adba262d9ddcf433409ebc15bb5355bfb001a4a \
-        "https://github.com/SpiderLabs/ModSecurity-nginx/archive/$MODSECURITY_VERSION.tar.gz"
+get_src c969a78659bb47c84929de0b9adc1f8c512a51ec9dd3b162cb568ae228d3d59e \
+        "https://github.com/SpiderLabs/ModSecurity-nginx/archive/v$MODSECURITY_VERSION.tar.gz"
 
-get_src 35b5a96ceb0aec68abdf25cdb9fe43cce09b2ab7bf52fb32d77038f21fef75ac \
-        "https://github.com/jaegertracing/jaeger-client-cpp/archive/v$JAEGER_VERSION.tar.gz"
+get_src db377619a07d538bdbf328272fdec3893e6f674bdf469b3b575f778866e3ace7 \
+        "https://github.com/jaegertracing/jaeger-client-cpp/archive/$JAEGER_VERSION.tar.gz"
 
-get_src 9915ad1cf0734cc5b357b0d9ea92fec94764b4bf22f4dce185cbd65feda30ec1 \
-        "https://github.com/AirisX/nginx_cookie_flag_module/archive/v$COOKIE_FLAG_VERSION.tar.gz"
+get_src ff865a36bad5c72b8e7ebc4b7cf5f27a820fce4faff9c571c1791e3728355a39 \
+        "https://github.com/msgpack/msgpack-c/archive/cpp-$MSGPACK_VERSION.tar.gz"
 
-get_src 027a1f1ddb35164c720451869fc5ea9095abaf70af02a1b17f59e0772c0cfec0 \
-        "https://github.com/openresty/lua-nginx-module/archive/$LUA_NGX_VERSION.tar.gz"
+get_src 052fd37cd698e24ab73ee18fc3fa55acd1d43153c12a0e65b0fba0447de1117e \
+        "https://github.com/DataDog/dd-opentracing-cpp/archive/v$DATADOG_CPP_VERSION.tar.gz"
 
-get_src 2a69815e4ae01aa8b170941a8e1a10b6f6a9aab699dee485d58f021dd933829a \
-        "https://github.com/openresty/lua-upstream-nginx-module/archive/v$LUA_UPSTREAM_VERSION.tar.gz"
+get_src 6faab57557bd9cc9fc38208f6bc304c1c13cf048640779f98812cf1f9567e202 \
+        "https://github.com/opentracing/lua-bridge-tracer/archive/v$LUA_BRIDGE_TRACER_VERSION.tar.gz"
 
-get_src 2349dd0b7ee37680306ee76bc4b6bf5c7509a4a4be16d246d9bbff44f564e4a0 \
-        "https://github.com/openresty/lua-resty-lrucache/archive/v0.08.tar.gz"
-
-get_src 2bba995e715a93134b86939c83baa33a1189f2461c41762619f3760e75311a18 \
-        "https://github.com/openresty/lua-resty-core/archive/v0.1.15.tar.gz"
-
-get_src eaf84f58b43289c1c3e0442ada9ed40406357f203adc96e2091638080cb8d361 \
-        "https://github.com/openresty/lua-resty-lock/archive/v0.07.tar.gz"
-
-get_src 3917d506e2d692088f7b4035c589cc32634de4ea66e40fc51259fbae43c9258d \
-        "https://github.com/hamishforbes/lua-resty-iputils/archive/v0.3.0.tar.gz"
-
-get_src 5d16e623d17d4f42cc64ea9cfb69ca960d313e12f5d828f785dd227cc483fcbd \
-        "https://github.com/openresty/lua-resty-upload/archive/v0.10.tar.gz"
-
-get_src 4aca34f324d543754968359672dcf5f856234574ee4da360ce02c778d244572a \
-        "https://github.com/openresty/lua-resty-dns/archive/v0.21.tar.gz"
-
-get_src 095615fe94e64615c4a27f4f4475b91c047cf8d10bc2dbde8d5ba6aa625fc5ab \
-        "https://github.com/openresty/lua-resty-string/archive/v0.11.tar.gz"
-
-get_src a77bf0d7cf6a9ba017d0dc973b1a58f13e48242dd3849c5e99c07d250667c44c \
-        "https://github.com/openresty/lua-resty-balancer/archive/v0.02rc4.tar.gz"
-
-get_src d81b33129c6fb5203b571fa4d8394823bf473d8872c0357a1d0f14420b1483bd \
-        "https://github.com/cloudflare/lua-resty-cookie/archive/v0.1.0.tar.gz"
-
-get_src 76d8638a350a0484b3d6658e329ba38bb831d407eaa6dce2a084a27a22063133 \
-        "https://github.com/openresty/luajit2/archive/v2.1-20180420.tar.gz"
-
-get_src 1897d7677d99c1cedeb95b2eb00652a4a7e8e604304c3053a93bd3ba7dd82884 \
+get_src 1af5a5632dc8b00ae103d51b7bf225de3a7f0df82f5c6a401996c080106e600e \
         "https://github.com/influxdata/nginx-influxdb-module/archive/$NGINX_INFLUXDB_VERSION.tar.gz"
 
-get_src ebb4652c4f9a2e1ee31fddefc4c93ff78e651a4b2727d3453d026bccbd708d99 \
+get_src 15bd1005228cf2c869a6f09e8c41a6aaa6846e4936c473106786ae8ac860fab7 \
         "https://github.com/leev/ngx_http_geoip2_module/archive/$GEOIP2_VERSION.tar.gz"
 
 get_src 5f629a50ba22347c441421091da70fdc2ac14586619934534e5a0f8a1390a950 \
         "https://github.com/yaoweibin/nginx_ajp_module/archive/$NGINX_AJP_VERSION.tar.gz"
+
+get_src c573435f495aac159e34eaa0a3847172a2298eb6295fcdc35d565f9f9b990513 \
+        "https://luarocks.github.io/luarocks/releases/luarocks-${RESTY_LUAROCKS_VERSION}.tar.gz"
+
+get_src 82209d5a5d9545c6dde3db7857f84345db22162fdea9743d5e2b2094d8d407f8 \
+        "https://github.com/openresty/lua-resty-balancer/archive/v${LUA_RESTY_BALANCER_VERSION}.tar.gz"
 
 # improve compilation times
 CORES=$(($(grep -c ^processor /proc/cpuinfo) - 0))
@@ -235,53 +180,40 @@ CORES=$(($(grep -c ^processor /proc/cpuinfo) - 0))
 export MAKEFLAGS=-j${CORES}
 export CTEST_BUILD_FLAGS=${MAKEFLAGS}
 export HUNTER_JOBS_NUMBER=${CORES}
+export HUNTER_KEEP_PACKAGE_SOURCES=false
+export HUNTER_USE_CACHE_SERVERS=true
 
-# Installing luarocks packages
+if [[ ${ARCH} == "armv7l" ]]; then
+  export PCRE_DIR=/usr/lib/arm-linux-gnueabihf
+fi
+
 if [[ ${ARCH} == "x86_64" ]]; then
-  luarocks install lrexlib-pcre 2.7.2-1
+  export PCRE_DIR=/usr/lib/x86_64-linux-gnu
 fi
 
-# luajit is not available on ppc64le and s390x
-if [[ (${ARCH} != "ppc64le") && (${ARCH} != "s390x") ]]; then
-  cd "$BUILD_PATH/luajit2-2.1-20180420"
-  make
-  make install
-
-  export LUAJIT_LIB=/usr/local/lib
-  export LUAJIT_INC=/usr/local/include/luajit-2.1
-  export LUA_LIB_DIR="$LUAJIT_LIB/lua"
-
-  cd "$BUILD_PATH/lua-resty-core-0.1.15"
-  make install
-
-  cd "$BUILD_PATH/lua-resty-lrucache-0.08"
-  make install
-
-  cd "$BUILD_PATH/lua-resty-lock-0.07"
-  make install
-
-  cd "$BUILD_PATH/lua-resty-iputils-0.3.0"
-  make install
-
-  cd "$BUILD_PATH/lua-resty-upload-0.10"
-  make install
-
-  cd "$BUILD_PATH/lua-resty-dns-0.21"
-  make install
-
-  cd "$BUILD_PATH/lua-resty-string-0.11"
-  make install
-
-  cd "$BUILD_PATH/lua-resty-balancer-0.02rc4"
-  make all
-  make install
-
-  cd "$BUILD_PATH/lua-resty-cookie-0.1.0"
-  make install
-
-  # build and install lua-resty-waf with dependencies
-  /install_lua_resty_waf.sh
+if [[ ${ARCH} == "aarch64" ]]; then
+  export PCRE_DIR=/usr/lib/aarch64-linux-gnu
 fi
+
+cd "$BUILD_PATH"
+
+export PATH=$PATH:/usr/local/openresty/luajit
+
+# install openresty-gdb-utils
+cd /
+git clone --depth=1 https://github.com/openresty/openresty-gdb-utils.git
+cat > ~/.gdbinit << EOF
+directory /openresty-gdb-utils
+
+py import sys
+py sys.path.append("/openresty-gdb-utils")
+
+source luajit20.gdb
+source ngx-lua.gdb
+source luajit21.py
+source ngx-raw-req.py
+set python print-stack full
+EOF
 
 # build opentracing lib
 cd "$BUILD_PATH/opentracing-cpp-$OPENTRACING_CPP_VERSION"
@@ -289,16 +221,20 @@ mkdir .build
 cd .build
 
 cmake   -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_TESTING=OFF ..
+        -DCMAKE_CXX_FLAGS="-fPIC" \
+        -DBUILD_TESTING=OFF \
+        -DBUILD_MOCKTRACER=OFF \
+        ..
 
 make
 make install
 
-# build jaeger lib
-cd "$BUILD_PATH/jaeger-client-cpp-$JAEGER_VERSION"
-sed -i 's/-Werror/-Wno-psabi/' CMakeLists.txt
+if [[ ${ARCH} != "armv7l" ]]; then
+  # build jaeger lib
+  cd "$BUILD_PATH/jaeger-client-cpp-$JAEGER_VERSION"
+  sed -i 's/-Werror/-Wno-psabi/' CMakeLists.txt
 
-cat <<EOF > export.map
+  cat <<EOF > export.map
 {
     global:
         OpenTracingMakeTracerFactory;
@@ -306,10 +242,10 @@ cat <<EOF > export.map
 };
 EOF
 
-mkdir .build
-cd .build
+  mkdir .build
+  cd .build
 
-cmake   -DCMAKE_BUILD_TYPE=Release \
+  cmake -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_TESTING=OFF \
         -DJAEGERTRACING_BUILD_EXAMPLES=OFF \
         -DJAEGERTRACING_BUILD_CROSSDOCK=OFF \
@@ -318,12 +254,13 @@ cmake   -DCMAKE_BUILD_TYPE=Release \
         -DHUNTER_CONFIGURATION_TYPES=Release \
         -DJAEGERTRACING_WITH_YAML_CPP=ON ..
 
-make
-make install
+  make
+  make install
 
-export HUNTER_INSTALL_DIR=$(cat _3rdParty/Hunter/install-root-dir) \
+  export HUNTER_INSTALL_DIR=$(cat _3rdParty/Hunter/install-root-dir) \
 
-mv libjaegertracing_plugin.so /usr/local/lib/libjaegertracing_plugin.so
+  mv libjaegertracing_plugin.so /usr/local/lib/libjaegertracing_plugin.so
+fi
 
 # build zipkin lib
 cd "$BUILD_PATH/zipkin-cpp-opentracing-$ZIPKIN_CPP_VERSION"
@@ -339,10 +276,35 @@ EOF
 mkdir .build
 cd .build
 
-cmake   -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_SHARED_LIBS=ON \
-        -DBUILD_PLUGIN=ON \
-        -DBUILD_TESTING=OFF ..
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_SHARED_LIBS=ON \
+      -DBUILD_PLUGIN=ON \
+      -DBUILD_TESTING=OFF ..
+
+make
+make install
+
+# build msgpack lib
+cd "$BUILD_PATH/msgpack-c-cpp-$MSGPACK_VERSION"
+
+mkdir .build
+cd .build
+cmake -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CXX_FLAGS="-fPIC" \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBUILD_TESTING=OFF \
+        -DBUILD_MOCKTRACER=OFF \
+        ..
+
+make
+make install
+
+# build datadog lib
+cd "$BUILD_PATH/dd-opentracing-cpp-$DATADOG_CPP_VERSION"
+
+mkdir .build
+cd .build
+cmake ..
 
 make
 make install
@@ -356,11 +318,8 @@ git submodule update
 
 # build modsecurity library
 cd "$BUILD_PATH"
-git clone -b v3/master --single-branch https://github.com/SpiderLabs/ModSecurity
+git clone -b v$MODSECURITY_LIB_VERSION https://github.com/SpiderLabs/ModSecurity
 cd ModSecurity/
-# TODO: use a tag once 3.0.3 is released
-# checkout v3.0.3
-# git checkout
 git submodule init
 git submodule update
 sh build.sh
@@ -368,21 +327,26 @@ sh build.sh
 make
 make install
 
+mkdir -p /etc/nginx/modsecurity
+cp modsecurity.conf-recommended /etc/nginx/modsecurity/modsecurity.conf
+cp unicode.mapping /etc/nginx/modsecurity/unicode.mapping
+
+# Replace serial logging with concurrent
+sed -i 's|SecAuditLogType Serial|SecAuditLogType Concurrent|g' /etc/nginx/modsecurity/modsecurity.conf
+
+# Concurrent logging implies the log is stored in several files
+echo "SecAuditLogStorageDir /var/log/audit/" >> /etc/nginx/modsecurity/modsecurity.conf
+
 # Download owasp modsecurity crs
 cd /etc/nginx/
-git clone -b v3.0/master --single-branch https://github.com/SpiderLabs/owasp-modsecurity-crs
+
+git clone -b v$OWASP_MODSECURITY_CRS_VERSION https://github.com/SpiderLabs/owasp-modsecurity-crs
 cd owasp-modsecurity-crs
-git checkout e4e0497be4d598cce0e0a8fef20d1f1e5578c8d0
 
 mv crs-setup.conf.example crs-setup.conf
 mv rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf.example rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf
 mv rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf.example rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf
 cd ..
-
-# Download modsecurity.conf
-mkdir modsecurity
-cd modsecurity
-curl -sSL -o modsecurity.conf https://raw.githubusercontent.com/SpiderLabs/ModSecurity/v3/master/modsecurity.conf-recommended
 
 # OWASP CRS v3 rules
 echo "
@@ -417,7 +381,7 @@ Include /etc/nginx/owasp-modsecurity-crs/rules/RESPONSE-999-EXCLUSION-RULES-AFTE
 " > /etc/nginx/owasp-modsecurity-crs/nginx-modsecurity.conf
 
 # build nginx
-cd "$BUILD_PATH/nginx-$NGINX_VERSION"
+cd "$BUILD_PATH/openresty-$OPENRESTY_VERSION"
 
 WITH_FLAGS="--with-debug \
   --with-compat \
@@ -436,11 +400,11 @@ WITH_FLAGS="--with-debug \
   --with-stream_ssl_module \
   --with-stream_ssl_preread_module \
   --with-threads \
-  --with-http_secure_link_module"
-
-if [[ ${ARCH} != "armv7l" || ${ARCH} != "aarch64" ]]; then
-  WITH_FLAGS+=" --with-file-aio"
-fi
+  --with-http_secure_link_module \
+  --with-http_gunzip_module \
+  --with-md5-asm \
+  --with-sha1-asm \
+  -j${CORES} "
 
 # "Combining -flto with -g is currently experimental and expected to produce unexpected results."
 # https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html
@@ -449,29 +413,29 @@ CC_OPT="-g -Og -fPIE -fstack-protector-strong \
   -Werror=format-security \
   -Wno-deprecated-declarations \
   -fno-strict-aliasing \
-  -Wdate-time \
   -D_FORTIFY_SOURCE=2 \
   --param=ssp-buffer-size=4 \
   -DTCP_FASTOPEN=23 \
   -fPIC \
-  -I$HUNTER_INSTALL_DIR/include \
   -Wno-cast-function-type"
 
-LD_OPT="-ljemalloc -fPIE -fPIC -pie -Wl,-z,relro -Wl,-z,now -L$HUNTER_INSTALL_DIR/lib"
+LD_OPT="-fPIE -fPIC -pie -Wl,-z,relro -Wl,-z,now"
+
+if [[ ${ARCH} != "armv7l" ]]; then
+  CC_OPT+=" -I$HUNTER_INSTALL_DIR/include"
+  LD_OPT+=" -L$HUNTER_INSTALL_DIR/lib"
+fi
+
+if [[ ${ARCH} != "aarch64" ]]; then
+  WITH_FLAGS+=" --with-file-aio"
+fi
 
 if [[ ${ARCH} == "x86_64" ]]; then
   CC_OPT+=' -m64 -mtune=native'
 fi
 
-WITH_MODULES="--add-module=$BUILD_PATH/ngx_devel_kit-$NDK_VERSION \
-  --add-module=$BUILD_PATH/set-misc-nginx-module-$SETMISC_VERSION \
-  --add-module=$BUILD_PATH/headers-more-nginx-module-$MORE_HEADERS_VERSION \
-  --add-module=$BUILD_PATH/nginx-goodies-nginx-sticky-module-ng-$STICKY_SESSIONS_VERSION \
-  --add-module=$BUILD_PATH/nginx-http-auth-digest-$NGINX_DIGEST_AUTH \
+WITH_MODULES="--add-module=$BUILD_PATH/nginx-http-auth-digest-$NGINX_DIGEST_AUTH \
   --add-module=$BUILD_PATH/ngx_http_substitutions_filter_module-$NGINX_SUBSTITUTIONS \
-  --add-module=$BUILD_PATH/lua-nginx-module-$LUA_NGX_VERSION \
-  --add-module=$BUILD_PATH/lua-upstream-nginx-module-$LUA_UPSTREAM_VERSION \
-  --add-module=$BUILD_PATH/nginx_cookie_flag_module-$COOKIE_FLAG_VERSION \
   --add-module=$BUILD_PATH/nginx-influxdb-module-$NGINX_INFLUXDB_VERSION \
   --add-dynamic-module=$BUILD_PATH/nginx-opentracing-$NGINX_OPENTRACING_VERSION/opentracing \
   --add-dynamic-module=$BUILD_PATH/ModSecurity-nginx-$MODSECURITY_VERSION \
@@ -479,19 +443,11 @@ WITH_MODULES="--add-module=$BUILD_PATH/ngx_devel_kit-$NDK_VERSION \
   --add-module=$BUILD_PATH/nginx_ajp_module-${NGINX_AJP_VERSION} \
   --add-module=$BUILD_PATH/ngx_brotli"
 
+make
+
+cd openresty-1.17.4.1rc0
+
 ./configure \
-  --prefix=/usr/share/nginx \
-  --conf-path=/etc/nginx/nginx.conf \
-  --modules-path=/etc/nginx/modules \
-  --http-log-path=/var/log/nginx/access.log \
-  --error-log-path=/var/log/nginx/error.log \
-  --lock-path=/var/lock/nginx.lock \
-  --pid-path=/run/nginx.pid \
-  --http-client-body-temp-path=/var/lib/nginx/body \
-  --http-fastcgi-temp-path=/var/lib/nginx/fastcgi \
-  --http-proxy-temp-path=/var/lib/nginx/proxy \
-  --http-scgi-temp-path=/var/lib/nginx/scgi \
-  --http-uwsgi-temp-path=/var/lib/nginx/uwsgi \
   ${WITH_FLAGS} \
   --without-mail_pop3_module \
   --without-mail_smtp_module \
@@ -500,19 +456,66 @@ WITH_MODULES="--add-module=$BUILD_PATH/ngx_devel_kit-$NDK_VERSION \
   --without-http_scgi_module \
   --with-cc-opt="${CC_OPT}" \
   --with-ld-opt="${LD_OPT}" \
-  --with-libatomic \
   --user=www-data \
   --group=www-data \
   ${WITH_MODULES}
-  
+
 make || exit 1
 make install || exit 1
+
+cd "$BUILD_PATH/luarocks-${RESTY_LUAROCKS_VERSION}"
+./configure \
+  --prefix=/usr/local/openresty/luajit \
+  --with-lua=/usr/local/openresty/luajit \
+  --lua-suffix=jit-2.1.0-beta3 \
+  --with-lua-include=/usr/local/openresty/luajit/include/luajit-2.1
+
+make || exit 1
+make install || exit 1
+
+export PATH=$PATH:/usr/local/openresty/luajit/bin
+
+cd /usr/local/openresty
+
+# build and install lua-resty-waf with dependencies
+export LUA_LIB_DIR=/usr/local/openresty/lualib
+export LUA_INCLUDE_DIR=/tmp/build/openresty-$OPENRESTY_VERSION/openresty-1.17.4.1rc0/build/luajit-root/usr/local/openresty/luajit/include/luajit-2.1
+
+ln -s $LUA_INCLUDE_DIR /usr/include/lua5.1
+
+if [[ ${ARCH} != "armv7l" ]]; then
+  luarocks install lrexlib-pcre 2.7.2-1 PCRE_LIBDIR=${PCRE_DIR}
+fi
+
+luarocks install lua-resty-iputils 0.3.0-1
+luarocks install lua-resty-cookie 0.1.0-1
+
+cd "$BUILD_PATH/lua-resty-balancer-$LUA_RESTY_BALANCER_VERSION"
+
+make
+make install
+
+# build Lua bridge tracer
+cd "$BUILD_PATH/lua-bridge-tracer-$LUA_BRIDGE_TRACER_VERSION"
+mkdir .build
+cd .build
+cmake ..
+make
+make install
+
+# mimalloc
+cd "$BUILD_PATH"
+git clone https://github.com/microsoft/mimalloc
+cd mimalloc
+mkdir -p out/release
+cd out/release
+cmake ../..
+make
+make install
 
 echo "Cleaning..."
 
 cd /
-
-mv /usr/share/nginx/sbin/nginx /usr/sbin
 
 apt-mark unmarkauto \
   bash \
@@ -521,11 +524,11 @@ apt-mark unmarkauto \
   libpcre3 \
   zlib1g \
   libaio1 \
-  xz-utils \
   geoip-bin \
   libyajl2 liblmdb0 libxml2 libpcre++ \
   gzip \
-  openssl
+  openssl \
+  libyaml-cpp0.6
 
 apt-get remove -y --purge \
   build-essential \
@@ -539,9 +542,17 @@ apt-get remove -y --purge \
   wget \
   patch \
   protobuf-compiler \
+  python \
+  xz-utils \
+  bc \
+  sensible-utils \
   git g++ pkgconf flex bison doxygen libyajl-dev liblmdb-dev libgeoip-dev libtool dh-autoreconf libpcre++-dev libxml2-dev
 
 apt-get autoremove -y
+
+# Remove configuration files left after the package removal.
+# To see such packages run: apt list | grep residual
+dpkg -l | grep '^rc' | awk '{print $2}' | xargs apt-get purge --yes
 
 rm -rf "$BUILD_PATH"
 rm -Rf /usr/share/man /usr/share/doc
@@ -559,22 +570,19 @@ rm -rf /etc/nginx/owasp-modsecurity-crs/util/regression-tests
 
 rm -rf $HOME/.hunter
 
+rm -rf $LUA_INCLUDE_DIR /usr/include/lua5.1
+
 # update image permissions
 writeDirs=( \
   /etc/nginx \
-  /var/lib/nginx \
-  /var/log/nginx \
+  /usr/local/openresty/nginx \
   /opt/modsecurity/var/log \
   /opt/modsecurity/var/upload \
   /opt/modsecurity/var/audit \
+  /var/log/audit \
 );
 
 for dir in "${writeDirs[@]}"; do
   mkdir -p ${dir};
   chown -R www-data.www-data ${dir};
 done
-
-chmod 755 /etc/authbind/byuid/33
-chown www-data /etc/authbind/byuid/33
-chmod 755 /etc/authbind/byport/*
-chown www-data /etc/authbind/byport/*
